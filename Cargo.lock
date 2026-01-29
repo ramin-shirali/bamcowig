@@ -65,6 +65,7 @@ dependencies = [
  "clap",
  "noodles-bam",
  "noodles-cram",
+ "noodles-sam",
 ]
 
 [[package]]
