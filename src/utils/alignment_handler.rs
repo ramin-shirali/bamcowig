@@ -8,7 +8,7 @@ struct Alignment {
     // Fields computed later
     coverage: Option<Vec<f64>>,
     read_count: Option<i32>,
-};
+}
 
 impl Alignment {
     fn new(alignment_file_path: PathBuf) -> Result<Alignment, Box<dyn std::error::Error>> {
