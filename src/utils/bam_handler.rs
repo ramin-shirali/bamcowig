@@ -1,10 +1,10 @@
-use std::{i32, path::PathBuf, vec};
+use std::{i32, path::PathBuf, path::Path, vec};
 use indexmap::IndexMap;
 use noodles_bam as bam;
 use noodles_sam::{self as sam, header::record::value::{Map, map::{ReferenceSequence, reference_sequence}}};
 use bstr;
 
-fn bam_header_reader(input_path: PathBuf) -> Result<sam::Header, std::io::Error>{
+fn bam_header_reader(input_path: &Path) -> Result<sam::Header, std::io::Error>{
     let mut reader = bam::io::reader::Builder::default().build_from_path(input_path)?;
     let header = reader.read_header()?;
     Ok(header)
@@ -17,14 +17,14 @@ pub fn bam_index_reader(input_path: PathBuf) -> Result<bam::bai::Index, std::io:
     Ok(index)
 }
 
-pub fn get_chromosome_names(input_path: PathBuf) -> Result<Vec<bstr::BString>, std::io::Error>{
+pub fn get_chromosome_names(input_path: &Path) -> Result<Vec<bstr::BString>, std::io::Error>{
     let header: sam::Header = bam_header_reader(input_path)?;
     let chromosomes = header.reference_sequences().keys().cloned().collect();
     // Ok::<_, io::Error>(())
     Ok(chromosomes)
 }
 
-pub fn get_chromosome_size_map(input_path: PathBuf) -> Result<IndexMap<bstr::BString,Map<ReferenceSequence>>, std::io::Error>{
+pub fn get_chromosome_size_map(input_path: &Path) -> Result<IndexMap<bstr::BString,Map<ReferenceSequence>>, std::io::Error>{
     let header: sam::Header = bam_header_reader(input_path)?;
     let reference_sequence = header.reference_sequences().clone();
     // Ok::<_, io::Error>(())
@@ -36,7 +36,7 @@ pub fn get_chromosome_size_map(input_path: PathBuf) -> Result<IndexMap<bstr::BSt
     
 // }
 
-pub fn get_chr_chunk_reads(input_path: PathBuf, chunk: String) -> Result<i32, std::io::Error>{
+pub fn get_chr_chunk_reads(input_path: &Path, chunk: String) -> Result<i32, std::io::Error>{
     let mut reader = bam::io::indexed_reader::Builder::default().build_from_path(input_path)?;
     let header = reader.read_header()?;
 
