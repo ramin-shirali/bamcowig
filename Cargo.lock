@@ -87,6 +87,8 @@ dependencies = [
  "clap",
  "indexmap",
  "noodles-bam",
+ "noodles-bgzf",
+ "noodles-core",
  "noodles-cram",
  "noodles-sam",
  "rayon",
