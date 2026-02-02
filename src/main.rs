@@ -7,6 +7,7 @@ use crate::utils::bam_handler::{get_chromosome_names,
     get_chromosome_size_map, 
     bam_index_reader,
     get_chr_chunk_reads};
+use crate::utils::alignment_handler;
 use std::any::type_name;
 
 
@@ -25,7 +26,7 @@ fn type_of<T>(_: T) -> &'static str {
     type_name::<T>()
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Cli::parse();
     println!("{:?}", args);
     let bam_file_path = args.bam_file_path;
@@ -36,7 +37,10 @@ fn main() {
     let chunk: String = String::from("chr1:10000-20000");
     let bin_size: usize = args.bin_size as usize;
     let chromosome_size_map = get_chromosome_size_map(&bam_file_path).unwrap();
-
+    let mut alignment = alignment_handler::Alignment::new(
+        bam_file_path
+    )?;
+    
     for (chromosome, ref_seq) in &chromosome_size_map {
         let chr_len = ref_seq.length().get();
         let mut start = 1;
@@ -46,7 +50,8 @@ fn main() {
             
             let region = format!("{}:{}-{}", chromosome, start, end);
             println!("{:#?}", region);
-            println!("{:#?}", get_chr_chunk_reads(&bam_file_path, region).unwrap());
+            println!("{:#?}", alignment.get_region_coverage(region)?);
+            //println!("{:#?}", get_chr_chunk_reads(&bam_file_path, region).unwrap());
             start += bin_size;
         }
         break;
@@ -54,4 +59,5 @@ fn main() {
     
     // println!("{:#?}", get_chromosome_names(args.bam_file_name).unwrap());
     // println!("{:#?}", get_chromosome_size_map(args.bam_file_name).unwrap());
+    Ok(())
 }
