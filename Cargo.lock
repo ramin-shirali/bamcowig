@@ -91,6 +91,7 @@ dependencies = [
  "noodles-core",
  "noodles-cram",
  "noodles-sam",
+ "noodles-util",
  "rayon",
 ]
 
@@ -960,6 +961,23 @@ dependencies = [
  "noodles-bgzf",
  "noodles-core",
  "noodles-csi",
+]
+
+[[package]]
+name = "noodles-util"
+version = "0.73.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1bc3fe88901262735dc4b4861c87d097d875263bb11a4db85d9ea0f5fc1439d"
+dependencies = [
+ "bstr",
+ "flate2",
+ "noodles-bam",
+ "noodles-bgzf",
+ "noodles-core",
+ "noodles-cram",
+ "noodles-csi",
+ "noodles-fasta",
+ "noodles-sam",
 ]
 
 [[package]]
