@@ -17,6 +17,8 @@ struct Cli {
     /// Path to the bam file
     #[arg(short, long)]
     bam_file_path: PathBuf,
+    #[arg(short, long)]
+    index_file_path: PathBuf,
     #[arg(long, default_value_t = 50)]
     bin_size: i32,
 }
@@ -30,15 +32,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Cli::parse();
     println!("{:?}", args);
     let bam_file_path = args.bam_file_path;
-    let bam_index_file_name: PathBuf = PathBuf::from(format!("{}.bai", bam_file_path.display()));
-    println!("{:#?}", bam_index_file_name);
-    let bam_index = bam_index_reader(bam_index_file_name).unwrap();
-    //println!("{:#?}", bam_index);
-    let chunk: String = String::from("chr1:10000-20000");
+    //let bam_index_file_name: PathBuf = PathBuf::from(format!("{}.bai", bam_file_path.display()));
+    let bam_index_file = args.index_file_path;
     let bin_size: usize = args.bin_size as usize;
     let chromosome_size_map = get_chromosome_size_map(&bam_file_path).unwrap();
-    let mut alignment = alignment_handler::Alignment::new(
-        bam_file_path
+    let mut alignment = alignment_handler::Alignment::from_bam(
+        bam_file_path,  bam_index_file
     )?;
     
     for (chromosome, ref_seq) in &chromosome_size_map {
