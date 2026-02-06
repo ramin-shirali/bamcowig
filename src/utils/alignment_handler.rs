@@ -9,8 +9,10 @@ use noodles_csi as csi;
 use noodles_csi::BinningIndex;
 use indexmap::IndexMap;
 use csi::binning_index::index::reference_sequence::Index as ReferenceSequenceIndex;
-pub type CsiIndex = csi::binning_index::Index<IndexMap<usize, VirtualPosition>>;
+use noodles_cram::io::reader as CramReader;
+use noodles_cram::io::reader::Container as CramContainer;
 
+pub type CsiIndex = csi::binning_index::Index<IndexMap<usize, VirtualPosition>>;
 
 pub enum CountableIndex {
     Bai(bai::Index),
@@ -126,7 +128,7 @@ impl Alignment<crai::Index> {
             .build_from_path(&alignment_path)?;
         let header = reader.read_header()?;
         let index = crai::fs::read(index_path)?;
-        let total_reads: u64 = Self::count_by_iteration(&mut reader, &header)?;
+        let total_reads: u64 = Self::count_from_containers(&alignment_path)?;
         
         Ok(Alignment {
             reader,
@@ -159,5 +161,24 @@ impl<I> Alignment<I>{
             count += 1;
         }
         Ok(count)
+    }
+
+    fn count_from_containers(alignment_path: &PathBuf) -> Result<u64, Box<dyn std::error::Error>> {
+    
+        let mut reader = CramReader::Builder::default()
+            .build_from_path(&alignment_path)?;
+
+        // Required for CRAM
+        reader.read_file_definition()?;
+        reader.read_file_header()?;
+
+        let mut total = 0u64;
+        let mut container = CramContainer::default();
+
+        while reader.read_container(&mut container)? > 0 {
+            total += container.header().record_count() as u64;
+        }
+
+        Ok(total)
     }
 }
