@@ -152,6 +152,35 @@ impl<I> Alignment<I>{
         Ok(count)
     }
 
+    pub fn coverage_by_bin_all(&mut self, bin_size:u16) -> Result<Vec<Vec<u32>>, Box< dyn std::error::Error>>{
+        let bin_size = bin_size as usize;
+        let mut coverage_over_bins_per_chromosome: Vec<Vec<u32>> = Vec::new();
+        let refs: Vec<_> = self.header.reference_sequences()
+            .iter()
+            .map(|(chr, info)| (chr.clone(), info.length().get()))
+            .collect();
+
+        for (chromosome, chromosome_length) in refs{
+            let mut coverage_over_bins = self.get_coverage_chr(bin_size, chromosome.to_string(), chromosome_length)?;
+            coverage_over_bins_per_chromosome.push(coverage_over_bins);
+        }
+        Ok(coverage_over_bins_per_chromosome)
+    }
+
+    pub fn get_coverage_chr(&mut self, bin_size: usize, chromosome: String, chromosome_length: usize) -> Result<Vec<u32>, Box<dyn std::error::Error>>{   
+        let mut coverage_over_bins: Vec<u32> = Vec::new();
+        let mut start = 0;
+        while start < chromosome_length {
+            let end = std::cmp::min(start + bin_size, chromosome_length);
+            
+            let region = format!("{}:{}-{}", chromosome, start, end);
+            coverage_over_bins.push(self.get_region_coverage(region)?);
+            //println!("{:#?}", get_chr_chunk_reads(&bam_file_path, region).unwrap());
+            start += bin_size;
+        }
+        Ok(coverage_over_bins)
+    }
+
     pub fn get_region_coverage(&mut self, region: String) -> Result<u32, Box<dyn std::error::Error>>{
         let region_parsed: Region = region.parse()?;
         let query = self.reader.query(&self.header, &region_parsed)?;
@@ -161,6 +190,7 @@ impl<I> Alignment<I>{
             count += 1;
         }
         Ok(count)
+        
     }
 
     fn count_from_containers(alignment_path: &PathBuf) -> Result<u64, Box<dyn std::error::Error>> {
