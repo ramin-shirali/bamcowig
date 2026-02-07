@@ -40,21 +40,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         bam_file_path,  bam_index_file
     )?;
     
-    for (chromosome, ref_seq) in &chromosome_size_map {
-        let chr_len = ref_seq.length().get();
-        let mut start = 1;
-
-        while start < chr_len {
-            let end = std::cmp::min(start + bin_size, chr_len);
-            
-            let region = format!("{}:{}-{}", chromosome, start, end);
-            println!("{:#?}", region);
-            println!("{:#?}", alignment.get_region_coverage(region)?);
-            //println!("{:#?}", get_chr_chunk_reads(&bam_file_path, region).unwrap());
-            start += bin_size;
-        }
-        break;
-    }
     
     // println!("{:#?}", get_chromosome_names(args.bam_file_name).unwrap());
     // println!("{:#?}", get_chromosome_size_map(args.bam_file_name).unwrap());
