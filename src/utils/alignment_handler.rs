@@ -11,6 +11,8 @@ use indexmap::IndexMap;
 use csi::binning_index::index::reference_sequence::Index as ReferenceSequenceIndex;
 use noodles_cram::io::reader as CramReader;
 use noodles_cram::io::reader::Container as CramContainer;
+use rayon::{prelude::*};
+use std::path::Path;
 
 pub type CsiIndex = csi::binning_index::Index<IndexMap<usize, VirtualPosition>>;
 
@@ -20,27 +22,31 @@ pub enum CountableIndex {
 }
 
 pub trait AlignmentIndex: Sized{
-    fn load(index_path: PathBuf) -> Result<Self, Box<dyn std::error::Error>>;
+    fn load(index_path: &Path) -> Result<Self, Box<dyn std::error::Error>>;
     fn count_total_reads(&self) -> Result<Option<u64>,Box<dyn std::error::Error>>;
 }
 
 impl AlignmentIndex for CountableIndex {
-    fn load(index_path: PathBuf) -> Result<Self, Box<dyn std::error::Error>>{
-        if index_path.exists(){          
-            match index_path.extension().and_then(|e| e.to_str()) {
-                Some("bai") => {
-                    let index = bai::fs::read(&index_path)?; 
-                    return Ok(CountableIndex::Bai(index))
-                }
-                Some("csi") => {
-                    let index = csi::fs::read(&index_path)?; 
-                    return Ok(CountableIndex::Csi(index))
-                }
-                _ => return Err("Unsupported index format".into()),
+
+
+    fn load(index_path: &Path) -> Result<Self, Box<dyn std::error::Error>>{
+        if !index_path.exists() {
+            return Err("No index (.bai or .csi) found".into());
+        }         
+        match index_path.extension().and_then(|e| e.to_str()) {
+            Some("bai") => {
+                let index = bai::fs::read(index_path)?; 
+                Ok(CountableIndex::Bai(index))
             }
+            Some("csi") => {
+                let index = csi::fs::read(index_path)?; 
+                Ok(CountableIndex::Csi(index))
+            }
+            _ => Err("Unsupported index format".into()),
         }
-        Err("No index (.bai or .csi) found".into())
+
     }
+    
     fn count_total_reads(&self) -> Result<Option<u64>, Box<dyn std::error::Error>> {
         match self {
             CountableIndex::Bai(index) => count_from_index(index),
@@ -79,7 +85,7 @@ fn count_from_index<I>(index: &csi::binning_index::Index<I>) ->
 
 
 impl AlignmentIndex for crai::Index{
-    fn load(index_path: PathBuf) -> Result<Self, Box<dyn std::error::Error>>{
+    fn load(index_path: &Path) -> Result<Self, Box<dyn std::error::Error>>{
         if index_path.exists(){
             let index = crai::fs::read(index_path)?;
             return Ok(index);
@@ -96,6 +102,8 @@ impl AlignmentIndex for crai::Index{
 
 
 pub struct Alignment<I>{
+    file_path: PathBuf,
+    index_path: PathBuf,
     reader: noodles_alignment::io::IndexedReader<std::fs::File>,
     header: noodles_sam::Header,
     index: I,
@@ -109,9 +117,11 @@ impl Alignment<CountableIndex> {
         let mut reader = noodles_alignment::io::indexed_reader::Builder::default()
             .build_from_path(&alignment_path)?;
         let header = reader.read_header()?;
-        let index = CountableIndex::load(index_path)?;
+        let index = CountableIndex::load(&index_path)?;
         let total_reads = index.count_total_reads()?.unwrap_or(0);
         Ok(Alignment {
+            file_path: alignment_path,
+            index_path: index_path,
             reader,
             header,
             index,
@@ -127,10 +137,12 @@ impl Alignment<crai::Index> {
         let mut reader = noodles_alignment::io::indexed_reader::Builder::default()
             .build_from_path(&alignment_path)?;
         let header = reader.read_header()?;
-        let index = crai::fs::read(index_path)?;
+        let index = crai::fs::read(&index_path)?;
         let total_reads: u64 = Self::count_from_containers(&alignment_path)?;
         
         Ok(Alignment {
+            file_path: alignment_path,
+            index_path,
             reader,
             header,
             index,
@@ -152,24 +164,87 @@ impl<I> Alignment<I>{
         Ok(count)
     }
 
-    pub fn coverage_by_bin_all(&mut self, bin_size:u16) -> Result<Vec<Vec<u32>>, Box< dyn std::error::Error>>{
+    pub fn coverage_by_bin_all(& mut self, bin_size:u16) -> Result<Vec<Vec<f64>>, Box< dyn std::error::Error>>{
         let bin_size = bin_size as usize;
-        let mut coverage_over_bins_per_chromosome: Vec<Vec<u32>> = Vec::new();
+        let mut coverage_over_bins_per_chromosome: Vec<Vec<f64>> = Vec::new();
         let refs: Vec<_> = self.header.reference_sequences()
             .iter()
             .map(|(chr, info)| (chr.clone(), info.length().get()))
             .collect();
 
-        for (chromosome, chromosome_length) in refs{
-            let mut coverage_over_bins = self.get_coverage_chr(bin_size, chromosome.to_string(), chromosome_length)?;
-            coverage_over_bins_per_chromosome.push(coverage_over_bins);
-        }
+        let file_path = &self.file_path;
+        
+        let coverage_over_bins_per_chromosome: Vec<Vec<f64>> = refs.par_iter()
+            .map(|(chromosome, chromosome_length)|{
+                let mut reader = noodles_alignment::io::indexed_reader::Builder::default()
+                .build_from_path(file_path)?;
+            reader.read_header()?;
+            Self::get_coverage_chr_with_reader_iterating_reads(
+                &mut reader, &self.header, bin_size,
+                chromosome.to_string(), *chromosome_length,
+            )
+            }).collect::<Result<Vec<Vec<f64>>, _>>()
+            .map_err(|e| e as Box<dyn std::error::Error>)?;
+        
         Ok(coverage_over_bins_per_chromosome)
     }
 
-    pub fn get_coverage_chr(&mut self, bin_size: usize, chromosome: String, chromosome_length: usize) -> Result<Vec<u32>, Box<dyn std::error::Error>>{   
+    fn get_coverage_chr_with_reader_iterating_reads(
+        reader: &mut noodles_alignment::io::IndexedReader<std::fs::File>,
+            header: &noodles_sam::Header,
+            bin_size: usize,
+            chromosome: String,
+            chromosome_length: usize,
+        ) -> Result<Vec<f64>, Box<dyn std::error::Error + Send + Sync>> 
+    {
+        let bin_count = chromosome_length / bin_size + 1;
+        let mut coverage_over_bins:Vec<f64> = vec![0f64; bin_count];
+        reader.records(header).map(|r| r.unwrap())
+        .for_each(|record|{
+            let start = record.alignment_start().unwrap().unwrap();
+            let end = record.alignment_end().unwrap().unwrap();
+            let start_bin = (start.get() - 1) /  bin_size; //noodles positions are 1-based. Yikes
+            let start_offset= (start.get() - 1) % bin_size;
+            let end_bin = (end.get() - 1) / bin_size;
+            let end_offset =  (end.get() - 1) % bin_size;
+            coverage_over_bins[start_bin] = (bin_size - start_offset) as f64 / bin_size as f64;
+            coverage_over_bins[end_bin] = end_offset as f64 / bin_size as f64;
+            if end_bin - start_bin > 1{
+                for i in (start_bin + 1)..end_bin{
+                    coverage_over_bins[i] += 1.0;
+                }
+            }
+        });
+        Ok(coverage_over_bins)
+    }
+
+
+    fn get_coverage_chr_with_reader(
+            reader: &mut noodles_alignment::io::IndexedReader<std::fs::File>,
+            header: &noodles_sam::Header,
+            bin_size: usize,
+            chromosome: String,
+            chromosome_length: usize,
+        ) -> Result<Vec<u32>, Box<dyn std::error::Error + Send + Sync>> {
         let mut coverage_over_bins: Vec<u32> = Vec::new();
-        let mut start = 0;
+        let mut start = 1;
+        while start < chromosome_length {
+            let end = std::cmp::min(start + bin_size, chromosome_length);
+            let region: Region = format!("{}:{}-{}", chromosome, start, end).parse()?;
+            let query = reader.query(header, &region)?;
+            let mut count = 0u32;
+            for result in query {
+                let _ = result?;
+                count += 1;
+            }
+            coverage_over_bins.push(count);
+            start += bin_size;
+        }
+        Ok(coverage_over_bins)
+    }
+    pub fn get_coverage_chr(&mut self, bin_size: usize, chromosome: String, chromosome_length: usize) -> Result<Vec<u32>, Box<dyn std::error::Error + Send + Sync>>{   
+        let mut coverage_over_bins: Vec<u32> = Vec::new();
+        let mut start = 1; //start position is 1. 0 gives error.
         while start < chromosome_length {
             let end = std::cmp::min(start + bin_size, chromosome_length);
             
@@ -181,7 +256,7 @@ impl<I> Alignment<I>{
         Ok(coverage_over_bins)
     }
 
-    pub fn get_region_coverage(&mut self, region: String) -> Result<u32, Box<dyn std::error::Error>>{
+    pub fn get_region_coverage(&mut self, region: String) -> Result<u32, Box<dyn std::error::Error + Send + Sync>>{
         let region_parsed: Region = region.parse()?;
         let query = self.reader.query(&self.header, &region_parsed)?;
         let mut count = 0u32;

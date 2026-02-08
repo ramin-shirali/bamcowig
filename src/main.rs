@@ -24,7 +24,7 @@ struct Cli {
     #[arg(short, long, default_value = "coverage_over_bins.bed")]
     output_file: PathBuf,
     #[arg(short, long, default_value_t = 8)]
-    threads: u16,
+    threads: usize,
 }
 
 
@@ -39,6 +39,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //let bam_index_file_name: PathBuf = PathBuf::from(format!("{}.bai", bam_file_path.display()));
     let bam_index_file = args.index_file_path;
     let bin_size = args.bin_size;
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(args.threads)
+        .build_global()
+        .unwrap();
     let chromosome_size_map = get_chromosome_size_map(&bam_file_path).unwrap();
     let mut alignment = alignment_handler::Alignment::from_bam(
         bam_file_path,  bam_index_file
@@ -50,7 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn write_output(output: PathBuf, coverage_over_bins_all_chromosomes: Vec<Vec<u32>>) -> Result<(), Box<dyn std::error::Error>>{
+fn write_output(output: PathBuf, coverage_over_bins_all_chromosomes: Vec<Vec<f64>>) -> Result<(), Box<dyn std::error::Error>>{
     let mut content = String::new();
     for (chr_idx, coverage_over_bins) in coverage_over_bins_all_chromosomes.iter().enumerate() {
         for (bin_idx, &coverage_single_bin) in coverage_over_bins.iter().enumerate() {
