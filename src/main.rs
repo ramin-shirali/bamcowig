@@ -48,17 +48,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         bam_file_path,  bam_index_file
     )?;
     let coverage_over_bins_all_chromosomes = alignment.coverage_by_bin_all(bin_size)?;
-    write_output(args.output_file, coverage_over_bins_all_chromosomes)?;
+    write_output(args.output_file, coverage_over_bins_all_chromosomes, bin_size as usize)?;
     // println!("{:#?}", get_chromosome_names(args.bam_file_name).unwrap());
     // println!("{:#?}", get_chromosome_size_map(args.bam_file_name).unwrap());
     Ok(())
 }
 
-fn write_output(output: PathBuf, coverage_over_bins_all_chromosomes: Vec<Vec<f64>>) -> Result<(), Box<dyn std::error::Error>>{
+fn write_output(output: PathBuf, coverage_over_bins_all_chromosomes: Vec<Vec<f64>>, bin_size: usize) -> Result<(), Box<dyn std::error::Error>>{
     let mut content = String::new();
     for (chr_idx, coverage_over_bins) in coverage_over_bins_all_chromosomes.iter().enumerate() {
         for (bin_idx, &coverage_single_bin) in coverage_over_bins.iter().enumerate() {
-            content.push_str(&format!("{}\t{}\t{}\n", chr_idx, bin_idx, coverage_single_bin));
+            let bin_start = bin_idx * bin_size;
+            let bin_end = bin_start + bin_size - 1;
+            content.push_str(&format!("chr{}\t{}\t{}\n", chr_idx, bin_idx, coverage_single_bin));
         }
     }
     fs::write(output, content).expect("Should be able to write to `/foo/tmp`");
