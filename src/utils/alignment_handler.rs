@@ -197,22 +197,37 @@ impl<I> Alignment<I>{
             chromosome_length: usize,
         ) -> Result<Vec<f64>, Box<dyn std::error::Error + Send + Sync>> 
     {
-        let bin_count = chromosome_length / bin_size + 1;
+        let bin_count = (chromosome_length / bin_size) +1 ;
         let mut coverage_over_bins:Vec<f64> = vec![0f64; bin_count];
-        reader.records(header).map(|r| r.unwrap())
-        .for_each(|record|{
+
+        let region: Region = format!("{}:{}-{}", chromosome, 1, chromosome_length).parse()?; //single_chromosome
+
+        reader.query(header, &region)?.map(|r| r.unwrap())
+        .for_each(|record| {
+
             let start = record.alignment_start().unwrap().unwrap();
             let end = record.alignment_end().unwrap().unwrap();
-            let start_bin = (start.get() - 1) /  bin_size; //noodles positions are 1-based. Yikes
+            let start_bin = (start.get() - 1) /  bin_size; //noodles positions are 1-based. Yikes.
             let start_offset= (start.get() - 1) % bin_size;
-            let end_bin = (end.get() - 1) / bin_size;
+            let end_bin = std::cmp::min((end.get() - 1) / bin_size, bin_count - 1); // Some aligners (e.g. BWA) can produce alignments that extend past the reference end. The BAM spec doesn't enforce that. Yikes.
+
             let end_offset =  (end.get() - 1) % bin_size;
-            coverage_over_bins[start_bin] = (bin_size - start_offset) as f64 / bin_size as f64;
-            coverage_over_bins[end_bin] = end_offset as f64 / bin_size as f64;
-            if end_bin - start_bin > 1{
-                for i in (start_bin + 1)..end_bin{
-                    coverage_over_bins[i] += 1.0;
+            
+            
+            
+            if end_bin == start_bin{
+                coverage_over_bins[start_bin] += 1.0;
+            }else{
+                println!("bin_size {:#?} and offset {:#?} and start_bin {:#?} and bin_count {:#?}", bin_size, start_offset, start_bin, bin_count);
+
+                coverage_over_bins[start_bin] = (bin_size - start_offset) as f64 / bin_size as f64;
+                coverage_over_bins[end_bin] = end_offset as f64 / bin_size as f64;
+                if end_bin - start_bin > 1{
+                    for i in (start_bin + 1)..end_bin{
+                        coverage_over_bins[i] += 1.0;
                 }
+            }
+            
             }
         });
         Ok(coverage_over_bins)
