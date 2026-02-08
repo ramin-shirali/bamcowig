@@ -218,7 +218,7 @@ impl<I> Alignment<I>{
             if end_bin == start_bin{
                 coverage_over_bins[start_bin] += 1.0;
             }else{
-                println!("bin_size {:#?} and offset {:#?} and start_bin {:#?} and bin_count {:#?}", bin_size, start_offset, start_bin, bin_count);
+                //println!("bin_size {:#?} and offset {:#?} and start_bin {:#?} and bin_count {:#?}", bin_size, start_offset, start_bin, bin_count);
 
                 coverage_over_bins[start_bin] = (bin_size - start_offset) as f64 / bin_size as f64;
                 coverage_over_bins[end_bin] = end_offset as f64 / bin_size as f64;
