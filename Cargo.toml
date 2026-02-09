@@ -8,6 +8,7 @@ edition = "2024"
 bigtools = "0.5.6"
 bstr = "1.12.1"
 clap = { version = "4.5.55", features = ["derive"] }
+getset = "0.1.6"
 indexmap = "2.13.0"
 noodles-bam = "0.85.0"
 noodles-bgzf = "0.45.0"
