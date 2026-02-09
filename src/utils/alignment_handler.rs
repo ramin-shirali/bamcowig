@@ -13,7 +13,7 @@ use noodles_cram::io::reader as CramReader;
 use noodles_cram::io::reader::Container as CramContainer;
 use rayon::{prelude::*};
 use std::path::Path;
-
+use crate::filter::Filter;
 pub type CsiIndex = csi::binning_index::Index<IndexMap<usize, VirtualPosition>>;
 
 pub enum CountableIndex {
@@ -164,7 +164,7 @@ impl<I> Alignment<I>{
         Ok(count)
     }
 
-    pub fn coverage_by_bin_all(& mut self, bin_size:u16) -> Result<Vec<Vec<f64>>, Box< dyn std::error::Error>>{
+    pub fn coverage_by_bin_all(& mut self, bin_size:u16, filter: Filter) -> Result<Vec<Vec<f64>>, Box< dyn std::error::Error>>{
         let bin_size = bin_size as usize;
         let mut coverage_over_bins_per_chromosome: Vec<Vec<f64>> = Vec::new();
         let refs: Vec<_> = self.header.reference_sequences()
@@ -181,7 +181,7 @@ impl<I> Alignment<I>{
             reader.read_header()?;
             Self::get_coverage_chr_with_reader_iterating_reads(
                 &mut reader, &self.header, bin_size,
-                chromosome.to_string(), *chromosome_length,
+                chromosome.to_string(), *chromosome_length, filter.clone()
             )
             }).collect::<Result<Vec<Vec<f64>>, _>>()
             .map_err(|e| e as Box<dyn std::error::Error>)?;
@@ -195,6 +195,7 @@ impl<I> Alignment<I>{
             bin_size: usize,
             chromosome: String,
             chromosome_length: usize,
+            filter: Filter,
         ) -> Result<Vec<f64>, Box<dyn std::error::Error + Send + Sync>> 
     {
         let bin_count = (chromosome_length / bin_size) +1 ;
@@ -203,8 +204,8 @@ impl<I> Alignment<I>{
         let region: Region = format!("{}:{}-{}", chromosome, 1, chromosome_length).parse()?; //single_chromosome
 
         reader.query(header, &region)?.map(|r| r.unwrap())
+        .filter(|record| !filter.apply(record).unwrap_or(false))
         .for_each(|record| {
-
             let start = record.alignment_start().unwrap().unwrap();
             let end = record.alignment_end().unwrap().unwrap();
             let start_bin = (start.get() - 1) /  bin_size; //noodles positions are 1-based. Yikes.

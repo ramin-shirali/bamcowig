@@ -2,15 +2,13 @@ mod utils;
 
 use clap::Parser;
 use noodles_sam::header::record::value::map::Inner;
+use crate::utils::filter::Filter;
 use std::{env, path::{Path, PathBuf}};
-use crate::utils::bam_handler::{get_chromosome_names, 
-    get_chromosome_size_map, 
-    bam_index_reader,
-    get_chr_chunk_reads};
+use crate::utils::{bam_handler::{bam_index_reader, get_chr_chunk_reads, get_chromosome_names, get_chromosome_size_map}, filter};
 use crate::utils::alignment_handler;
 use std::any::type_name;
 use std::fs;
-
+ 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Cli {
@@ -43,11 +41,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .num_threads(args.threads)
         .build_global()
         .unwrap();
+
+    let filter = Filter::default();
     let chromosome_size_map = get_chromosome_size_map(&bam_file_path).unwrap();
     let mut alignment = alignment_handler::Alignment::from_bam(
         bam_file_path,  bam_index_file
     )?;
-    let coverage_over_bins_all_chromosomes = alignment.coverage_by_bin_all(bin_size)?;
+    let coverage_over_bins_all_chromosomes = alignment.coverage_by_bin_all(bin_size, filter)?;
     write_output(args.output_file, coverage_over_bins_all_chromosomes, bin_size as usize)?;
     // println!("{:#?}", get_chromosome_names(args.bam_file_name).unwrap());
     // println!("{:#?}", get_chromosome_size_map(args.bam_file_name).unwrap());
