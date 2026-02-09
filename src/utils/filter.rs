@@ -3,7 +3,10 @@
 
 use noodles_util::alignment::Record;
 use noodles_sam::alignment::Record as _;
+use getset::{Getters, Setters, MutGetters};
+use crate::utils::alignment_handler::Alignment;
 
+#[derive(Clone)]
 #[derive(Default)]
 pub enum PairFilter {
     Strict,    // Only properly paired
@@ -12,7 +15,7 @@ pub enum PairFilter {
     Off,       // No pair filtering at all
 }
 
-
+#[derive(Clone)]
 #[derive(PartialEq)]
 pub enum StrandSelection {
     Both,
@@ -20,8 +23,11 @@ pub enum StrandSelection {
     Reverse,
 }
 
+#[derive(Clone)]
+#[derive(Getters, Setters, MutGetters)]
+#[getset(get = "pub", set = "pub")]
 pub struct Filter{
-    minimum_mapping_quality: i32,
+    minimum_mapping_quality: u32,
     ignore_duplicates_flag: bool,
     strand_selection: StrandSelection,
     secondary_alignment_skip: bool,
@@ -43,7 +49,8 @@ impl Default for Filter{
 }
 
 impl Filter{
-    pub fn apply(&self, record: &Record) -> Result<bool, Box<dyn std::error::Error>> {
+
+    pub fn apply(&self, record: &Box<dyn noodles_sam::alignment::Record>) -> Result<bool, Box<dyn std::error::Error>> {
         if self.check_alignment(record)?{
             return Ok(true);
         }
@@ -65,10 +72,10 @@ impl Filter{
         Ok(false)
     }
 
-    fn check_mapping_quality(&self, record: &Record) -> Result<bool, Box<dyn std::error::Error>>{
+    fn check_mapping_quality(&self, record: &Box<dyn noodles_sam::alignment::Record>) -> Result<bool, Box<dyn std::error::Error>>{
         let quality = record.mapping_quality()
         .transpose()? //flips Option and Result from mapping_quality
-        .map(|mq| mq.get() as i32) // MappingQuality is a wrapper around u8, .get() extracts the u8, then cast to i32
+        .map(|mq| mq.get() as u32) // MappingQuality is a wrapper around u8, .get() extracts the u8, then cast to i32
         .unwrap_or(0); // None means unmap. So 0 in that case to filter.         
         if quality == 255{
             Ok(false) // 255 means quality score is not available
@@ -76,11 +83,11 @@ impl Filter{
             Ok(quality < self.minimum_mapping_quality)
         }
     }
-    fn check_duplicate(&self, record: &Record) -> Result<bool, Box<dyn std::error::Error>>{
+    fn check_duplicate(&self, record: &Box<dyn noodles_sam::alignment::Record>) -> Result<bool, Box<dyn std::error::Error>>{
         let duplicate_alignment = record.flags()?.is_duplicate();
         Ok(duplicate_alignment)
     }
-    fn check_strand_selection(&self, record: &Record) -> Result<bool, Box<dyn std::error::Error>>{
+    fn check_strand_selection(&self, record: &Box<dyn noodles_sam::alignment::Record>) -> Result<bool, Box<dyn std::error::Error>>{
         let flags = record.flags()?;
         match self.strand_selection {
             StrandSelection::Both => Ok(false),
@@ -88,15 +95,15 @@ impl Filter{
             StrandSelection::Reverse => Ok(!flags.is_reverse_complemented()), // Thats why it is reversed.
         }
     }
-    fn check_secondary_alignment(&self, record: &Record) -> Result<bool, Box<dyn std::error::Error>>{
+    fn check_secondary_alignment(&self, record: &Box<dyn noodles_sam::alignment::Record>) -> Result<bool, Box<dyn std::error::Error>>{
         let secondary_alignment = record.flags()?.is_secondary();
         Ok(secondary_alignment)
     }
-    fn check_supplementary_alignment(&self, record: &Record) -> Result<bool, Box<dyn std::error::Error>>{
+    fn check_supplementary_alignment(&self, record: &Box<dyn noodles_sam::alignment::Record>) -> Result<bool, Box<dyn std::error::Error>>{
         let supplementary_alignment = record.flags()?.is_supplementary();
         Ok(supplementary_alignment)
     }
-    fn check_alignment(&self, record: &Record) -> Result<bool, Box<dyn std::error::Error>> {
+    fn check_alignment(&self, record: &Box<dyn noodles_sam::alignment::Record>) -> Result<bool, Box<dyn std::error::Error>> {
         let flags = record.flags()?;
 
         match self.pair_filter {
