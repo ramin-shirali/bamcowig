@@ -95,6 +95,7 @@ dependencies = [
  "noodles-sam",
  "noodles-util",
  "rayon",
+ "tokio",
 ]
 
 [[package]]
