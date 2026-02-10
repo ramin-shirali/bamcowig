@@ -102,6 +102,7 @@ impl AlignmentIndex for crai::Index{
 
 
 #[derive(Getters, Setters, MutGetters)]
+#[getset(get = "pub")]
 pub struct Alignment<I>{
     file_path: PathBuf,
     index_path: PathBuf,

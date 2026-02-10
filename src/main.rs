@@ -8,6 +8,8 @@ use crate::utils::{bam_handler::{bam_index_reader, get_chr_chunk_reads, get_chro
 use crate::utils::alignment_handler;
 use std::any::type_name;
 use std::fs;
+use crate::utils::normalizer::{cpm, rpkm, rpgc, bpm};
+
  
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -25,6 +27,10 @@ struct Cli {
     threads: usize,
     #[arg(long, default_value_t = false)]
     extend_to_fragment: bool,
+    #[arg(long, default_value = "none")]
+    normalize: String,
+    #[arg(short, long, default_value_t = false)]
+    fraction_counts: bool,
 }
 
 
@@ -51,6 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         bam_file_path,  bam_index_file, None
     )?;
     let coverage_over_bins_all_chromosomes = alignment.coverage_by_bin_all(bin_size, filter, extend_to_fragment)?;
+    let normalized_over_bins_all_chromosomes = cpm(coverage_over_bins_all_chromosomes, alignment.total_reads().clone())?;
     write_output(args.output_file, coverage_over_bins_all_chromosomes, bin_size as usize)?;
 
     Ok(())
