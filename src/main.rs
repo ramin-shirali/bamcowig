@@ -46,6 +46,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bam_index_file = args.index_file_path;
     let bin_size = args.bin_size;
     let extend_to_fragment = args.extend_to_fragment;
+    let fraction_counts = args.fraction_counts;
+
 
     rayon::ThreadPoolBuilder::new()
         .num_threads(args.threads)
@@ -56,9 +58,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut alignment = alignment_handler::Alignment::from_bam(
         bam_file_path,  bam_index_file, None
     )?;
-    let coverage_over_bins_all_chromosomes = alignment.coverage_by_bin_all(bin_size, filter, extend_to_fragment)?;
-    let normalized_over_bins_all_chromosomes = cpm(coverage_over_bins_all_chromosomes, alignment.total_reads().clone())?;
-    write_output(args.output_file, coverage_over_bins_all_chromosomes, bin_size as usize)?;
+    let coverage_over_bins_all_chromosomes = alignment.coverage_by_bin_all(bin_size, filter, extend_to_fragment, fraction_counts)?;
+    let normalized_over_bins_all_chromosomes = cpm(coverage_over_bins_all_chromosomes, alignment.total_reads().clone()).unwrap();
+    write_output(args.output_file, normalized_over_bins_all_chromosomes, bin_size as usize)?;
 
     Ok(())
 }

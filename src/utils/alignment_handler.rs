@@ -170,7 +170,7 @@ impl<I> Alignment<I>{
         Ok(count)
     }
 
-    pub fn coverage_by_bin_all(& mut self, bin_size:u16, filter: Filter, extend_to_fragment: bool) -> Result<Vec<Vec<f64>>, Box< dyn std::error::Error>>{
+    pub fn coverage_by_bin_all(& mut self, bin_size:u16, filter: Filter, extend_to_fragment: bool, fraction_counts: bool) -> Result<Vec<Vec<f64>>, Box< dyn std::error::Error>>{
         let bin_size = bin_size as usize;
 
         let refs: Vec<_> = self.header.reference_sequences()
@@ -187,7 +187,7 @@ impl<I> Alignment<I>{
             reader.read_header()?;
             Self::get_coverage_chr_with_reader_iterating_reads_extend_to_fragment(
                 &mut reader, &self.header, bin_size,
-                chromosome.to_string(), *chromosome_length, filter.clone(), self.is_pair_end
+                chromosome.to_string(), *chromosome_length, filter.clone(), self.is_pair_end, fraction_counts
             )
             }).collect::<Result<Vec<Vec<f64>>, _>>()
             .map_err(|e| e as Box<dyn std::error::Error>)?;
@@ -202,7 +202,7 @@ impl<I> Alignment<I>{
             reader.read_header()?;
             Self::get_coverage_chr_with_reader_iterating_reads(
                 &mut reader, &self.header, bin_size,
-                chromosome.to_string(), *chromosome_length, filter.clone()
+                chromosome.to_string(), *chromosome_length, filter.clone(), fraction_counts
             )
             }).collect::<Result<Vec<Vec<f64>>, _>>()
             .map_err(|e| e as Box<dyn std::error::Error>)?;
@@ -222,6 +222,7 @@ impl<I> Alignment<I>{
             chromosome_length: usize,
             filter: Filter,
             is_pair_end: bool,
+            fraction_counts: bool,
         ) -> Result<Vec<f64>, Box<dyn std::error::Error + Send + Sync>> 
     {
         let bin_count = (chromosome_length / bin_size) +1 ;
@@ -235,7 +236,8 @@ impl<I> Alignment<I>{
             bin_size, 
             filter,
             region,
-            bin_count,)?)
+            bin_count,
+            fraction_counts,)?)
         }else{
             Ok(Self::coverage_extend_to_fragment_single_end(
             reader, 
@@ -243,7 +245,8 @@ impl<I> Alignment<I>{
             bin_size, 
             filter,
             region,
-            bin_count,)?)
+            bin_count,
+            fraction_counts,)?)
         }
         
     }
@@ -255,6 +258,7 @@ impl<I> Alignment<I>{
             filter: Filter,
             region: Region, 
             bin_count: usize,
+            fraction_counts: bool,
         ) -> Result<Vec<f64>, Box< dyn std::error::Error + Send + Sync>>
     {
         let mut coverage_over_bins:Vec<f64> = vec![0f64; bin_count];
@@ -275,18 +279,24 @@ impl<I> Alignment<I>{
             let end_offset =  (fragment_end - 1) % bin_size;
             let flags = record.flags().unwrap();
             
-            if end_bin == start_bin{
-                coverage_over_bins[start_bin] += 1.0;
-            }else{
-                
-                coverage_over_bins[start_bin] = (bin_size - start_offset) as f64 / bin_size as f64;
-                coverage_over_bins[end_bin] = end_offset as f64 / bin_size as f64;
-                if end_bin - start_bin > 1{
-                    for i in (start_bin + 1)..end_bin{
-                        coverage_over_bins[i] += 1.0;
+
+            if fraction_counts{ // Fractional calculation of coverage for the starting and ending bin of the alignment
+                if end_bin == start_bin{
+                    coverage_over_bins[start_bin] += 1.0;
+                }else{
+                    
+                    coverage_over_bins[start_bin] = (bin_size - start_offset) as f64 / bin_size as f64;
+                    coverage_over_bins[end_bin] = end_offset as f64 / bin_size as f64;
+                    if end_bin - start_bin > 1{
+                        for i in (start_bin + 1)..end_bin{
+                            coverage_over_bins[i] += 1.0;
+                        }
+                    }
                 }
-            }
-            
+            }else{ // Adding +1 to a bin even if the read was covering it partially
+                for i in (start_bin + 1)..end_bin{
+                            coverage_over_bins[i] += 1.0;
+                }
             }
         });
         Ok(coverage_over_bins)
@@ -299,6 +309,7 @@ impl<I> Alignment<I>{
             filter: Filter,
             region: Region, 
             bin_count: usize,
+            fraction_counts: bool,
         ) -> Result<Vec<f64>, Box< dyn std::error::Error + Send + Sync>>
     {
         let mut coverage_over_bins:Vec<f64> = vec![0f64; bin_count];
@@ -326,18 +337,23 @@ impl<I> Alignment<I>{
 
             let end_offset =  (fragment_end - 1) % bin_size;
             
-            if end_bin == start_bin{
-                coverage_over_bins[start_bin] += 1.0;
-            }else{
-                
-                coverage_over_bins[start_bin] = (bin_size - start_offset) as f64 / bin_size as f64;
-                coverage_over_bins[end_bin] = end_offset as f64 / bin_size as f64;
-                if end_bin - start_bin > 1{
-                    for i in (start_bin + 1)..end_bin{
-                        coverage_over_bins[i] += 1.0;
+            if fraction_counts{ // Fractional calculation of coverage for the starting and ending bin of the alignment
+                if end_bin == start_bin{
+                    coverage_over_bins[start_bin] += 1.0;
+                }else{
+                    
+                    coverage_over_bins[start_bin] = (bin_size - start_offset) as f64 / bin_size as f64;
+                    coverage_over_bins[end_bin] = end_offset as f64 / bin_size as f64;
+                    if end_bin - start_bin > 1{
+                        for i in (start_bin + 1)..end_bin{
+                            coverage_over_bins[i] += 1.0;
+                        }
+                    }
                 }
-            }
-            
+            }else{ // Adding +1 to a bin even if the read was covering it partially
+                for i in (start_bin + 1)..end_bin{
+                            coverage_over_bins[i] += 1.0;
+                }
             }
         });
         Ok(coverage_over_bins)
@@ -352,6 +368,7 @@ impl<I> Alignment<I>{
             chromosome: String,
             chromosome_length: usize,
             filter: Filter,
+            fraction_counts: bool,
         ) -> Result<Vec<f64>, Box<dyn std::error::Error + Send + Sync>> 
     {
         let bin_count = (chromosome_length / bin_size) +1 ;
@@ -371,20 +388,26 @@ impl<I> Alignment<I>{
             let end_offset =  (end.get() - 1) % bin_size;
             let flags = record.flags().unwrap();
             
-            if end_bin == start_bin{
-                coverage_over_bins[start_bin] += 1.0;
-            }else{
-                //println!("bin_size {:#?} and offset {:#?} and start_bin {:#?} and bin_count {:#?}", bin_size, start_offset, start_bin, bin_count);
-
-                coverage_over_bins[start_bin] = (bin_size - start_offset) as f64 / bin_size as f64;
-                coverage_over_bins[end_bin] = end_offset as f64 / bin_size as f64;
-                if end_bin - start_bin > 1{
-                    for i in (start_bin + 1)..end_bin{
-                        coverage_over_bins[i] += 1.0;
+            if fraction_counts{ // Fractional calculation of coverage for the starting and ending bin of the alignment
+                if end_bin == start_bin{
+                    coverage_over_bins[start_bin] += 1.0;
+                }else{
+                    
+                    coverage_over_bins[start_bin] = (bin_size - start_offset) as f64 / bin_size as f64;
+                    coverage_over_bins[end_bin] = end_offset as f64 / bin_size as f64;
+                    if end_bin - start_bin > 1{
+                        for i in (start_bin + 1)..end_bin{
+                            coverage_over_bins[i] += 1.0;
+                        }
+                    }
+                }
+            }else{ // Adding +1 to a bin even if the read was covering it partially
+                for i in (start_bin + 1)..end_bin{
+                            coverage_over_bins[i] += 1.0;
                 }
             }
             
-            }
+            
         });
         Ok(coverage_over_bins)
     }
