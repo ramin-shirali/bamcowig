@@ -23,6 +23,8 @@ struct Cli {
     output_file: PathBuf,
     #[arg(short, long, default_value_t = 8)]
     threads: usize,
+    #[arg(long, default_value_t = false)]
+    extend_to_fragment: bool,
 }
 
 
@@ -34,25 +36,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Cli::parse();
     println!("{:?}", args);
     let bam_file_path = args.bam_file_path;
-    //let bam_index_file_name: PathBuf = PathBuf::from(format!("{}.bai", bam_file_path.display()));
+    
     let bam_index_file = args.index_file_path;
     let bin_size = args.bin_size;
+    let extend_to_fragment = args.extend_to_fragment;
+
     rayon::ThreadPoolBuilder::new()
         .num_threads(args.threads)
         .build_global()
         .unwrap();
 
     let filter = Filter::default();
-    let chromosome_size_map = get_chromosome_size_map(&bam_file_path).unwrap();
     let mut alignment = alignment_handler::Alignment::from_bam(
-        bam_file_path,  bam_index_file
+        bam_file_path,  bam_index_file, None
     )?;
-    let coverage_over_bins_all_chromosomes = alignment.coverage_by_bin_all(bin_size, filter)?;
+    let coverage_over_bins_all_chromosomes = alignment.coverage_by_bin_all(bin_size, filter, extend_to_fragment)?;
     write_output(args.output_file, coverage_over_bins_all_chromosomes, bin_size as usize)?;
-    // println!("{:#?}", get_chromosome_names(args.bam_file_name).unwrap());
-    // println!("{:#?}", get_chromosome_size_map(args.bam_file_name).unwrap());
+
     Ok(())
 }
+
 
 fn write_output(output: PathBuf, coverage_over_bins_all_chromosomes: Vec<Vec<f64>>, bin_size: usize) -> Result<(), Box<dyn std::error::Error>>{
     let mut content = String::new();

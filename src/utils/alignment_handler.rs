@@ -15,6 +15,7 @@ use rayon::{prelude::*};
 use std::path::Path;
 use crate::filter::Filter;
 pub type CsiIndex = csi::binning_index::Index<IndexMap<usize, VirtualPosition>>;
+use getset::{Getters, Setters, MutGetters};
 
 pub enum CountableIndex {
     Bai(bai::Index),
@@ -100,7 +101,7 @@ impl AlignmentIndex for crai::Index{
 
 
 
-
+#[derive(Getters, Setters, MutGetters)]
 pub struct Alignment<I>{
     file_path: PathBuf,
     index_path: PathBuf,
@@ -108,17 +109,19 @@ pub struct Alignment<I>{
     header: noodles_sam::Header,
     index: I,
     total_reads: u64,
-    file_type: String
+    file_type: String,
+    is_pair_end: bool,
 }
 
 
 impl Alignment<CountableIndex> {
-    pub fn from_bam(alignment_path: PathBuf, index_path: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_bam(alignment_path: PathBuf, index_path: PathBuf, pair_end_flag: Option<bool>) -> Result<Self, Box<dyn std::error::Error>> {
         let mut reader = noodles_alignment::io::indexed_reader::Builder::default()
             .build_from_path(&alignment_path)?;
         let header = reader.read_header()?;
         let index = CountableIndex::load(&index_path)?;
         let total_reads = index.count_total_reads()?.unwrap_or(0);
+        let is_pair_end = pair_end_flag.unwrap_or(reader.records(&header).next().unwrap()?.flags()?.is_segmented());
         Ok(Alignment {
             file_path: alignment_path,
             index_path: index_path,
@@ -127,19 +130,20 @@ impl Alignment<CountableIndex> {
             index,
             total_reads,
             file_type: "bam".to_string(),
+            is_pair_end,
         })
         
     }
 }
 
 impl Alignment<crai::Index> {
-    pub fn from_cram(alignment_path: PathBuf, index_path: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_cram(alignment_path: PathBuf, index_path: PathBuf, pair_end_flag: Option<bool>) -> Result<Self, Box<dyn std::error::Error>> {
         let mut reader = noodles_alignment::io::indexed_reader::Builder::default()
             .build_from_path(&alignment_path)?;
         let header = reader.read_header()?;
         let index = crai::fs::read(&index_path)?;
         let total_reads: u64 = Self::count_from_containers(&alignment_path)?;
-        
+        let is_pair_end = pair_end_flag.unwrap_or(reader.records(&header).next().unwrap()?.flags()?.is_segmented());
         Ok(Alignment {
             file_path: alignment_path,
             index_path,
@@ -148,6 +152,7 @@ impl Alignment<crai::Index> {
             index,
             total_reads,
             file_type: "cram".to_string(),
+            is_pair_end,
         })
     }
 }
@@ -164,17 +169,32 @@ impl<I> Alignment<I>{
         Ok(count)
     }
 
-    pub fn coverage_by_bin_all(& mut self, bin_size:u16, filter: Filter) -> Result<Vec<Vec<f64>>, Box< dyn std::error::Error>>{
+    pub fn coverage_by_bin_all(& mut self, bin_size:u16, filter: Filter, extend_to_fragment: bool) -> Result<Vec<Vec<f64>>, Box< dyn std::error::Error>>{
         let bin_size = bin_size as usize;
-        let mut coverage_over_bins_per_chromosome: Vec<Vec<f64>> = Vec::new();
+
         let refs: Vec<_> = self.header.reference_sequences()
             .iter()
             .map(|(chr, info)| (chr.clone(), info.length().get()))
             .collect();
 
         let file_path = &self.file_path;
+        if extend_to_fragment{ // /extend by fragments
+            let coverage_over_bins_per_chromosome: Vec<Vec<f64>> = refs.par_iter()
+            .map(|(chromosome, chromosome_length)|{
+                let mut reader = noodles_alignment::io::indexed_reader::Builder::default()
+                .build_from_path(file_path)?;
+            reader.read_header()?;
+            Self::get_coverage_chr_with_reader_iterating_reads_extend_to_fragment(
+                &mut reader, &self.header, bin_size,
+                chromosome.to_string(), *chromosome_length, filter.clone(), self.is_pair_end
+            )
+            }).collect::<Result<Vec<Vec<f64>>, _>>()
+            .map_err(|e| e as Box<dyn std::error::Error>)?;
         
-        let coverage_over_bins_per_chromosome: Vec<Vec<f64>> = refs.par_iter()
+            Ok(coverage_over_bins_per_chromosome)
+            
+        }else{ // just calculate aligned regions for coverage
+            let coverage_over_bins_per_chromosome: Vec<Vec<f64>> = refs.par_iter()
             .map(|(chromosome, chromosome_length)|{
                 let mut reader = noodles_alignment::io::indexed_reader::Builder::default()
                 .build_from_path(file_path)?;
@@ -186,7 +206,142 @@ impl<I> Alignment<I>{
             }).collect::<Result<Vec<Vec<f64>>, _>>()
             .map_err(|e| e as Box<dyn std::error::Error>)?;
         
-        Ok(coverage_over_bins_per_chromosome)
+            Ok(coverage_over_bins_per_chromosome)
+        }
+        
+    }
+
+
+
+    fn get_coverage_chr_with_reader_iterating_reads_extend_to_fragment(
+        reader: &mut noodles_alignment::io::IndexedReader<std::fs::File>,
+            header: &noodles_sam::Header,
+            bin_size: usize,
+            chromosome: String,
+            chromosome_length: usize,
+            filter: Filter,
+            is_pair_end: bool,
+        ) -> Result<Vec<f64>, Box<dyn std::error::Error + Send + Sync>> 
+    {
+        let bin_count = (chromosome_length / bin_size) +1 ;
+
+
+        let region: Region = format!("{}:{}-{}", chromosome, 1, chromosome_length).parse()?; //single_chromosome
+        if is_pair_end{
+            Ok(Self::coverage_extend_to_fragment_pair_end(
+            reader, 
+            header, 
+            bin_size, 
+            filter,
+            region,
+            bin_count,)?)
+        }else{
+            Ok(Self::coverage_extend_to_fragment_single_end(
+            reader, 
+            header, 
+            bin_size, 
+            filter,
+            region,
+            bin_count,)?)
+        }
+        
+    }
+
+    fn coverage_extend_to_fragment_pair_end(
+        reader: &mut noodles_alignment::io::IndexedReader<std::fs::File>,
+            header: &noodles_sam::Header,
+            bin_size: usize,
+            filter: Filter,
+            region: Region, 
+            bin_count: usize,
+        ) -> Result<Vec<f64>, Box< dyn std::error::Error + Send + Sync>>
+    {
+        let mut coverage_over_bins:Vec<f64> = vec![0f64; bin_count];
+        reader.query(header, &region)?.map(|r| r.unwrap())
+        .filter(|record| !filter.apply(record).unwrap_or(false)).filter(|record| record.template_length().unwrap() > 0)
+        .for_each(|record| {
+
+            let start = record.alignment_start().unwrap().unwrap();
+            let template_length = record.template_length().unwrap();
+            if template_length < 0{
+                println!("sanity check!!! template length <0!! template_length: {:#?}", template_length)
+            }
+            let fragment_end = start.get() + template_length.abs() as usize;
+            let start_bin = (start.get() - 1) /  bin_size; //noodles positions are 1-based. Yikes.
+            let start_offset= (start.get() - 1) % bin_size;
+            let end_bin = std::cmp::min((fragment_end - 1) / bin_size, bin_count - 1); // Some aligners (e.g. BWA) can produce alignments that extend past the reference end. The BAM spec doesn't enforce that. Yikes.
+
+            let end_offset =  (fragment_end - 1) % bin_size;
+            let flags = record.flags().unwrap();
+            
+            if end_bin == start_bin{
+                coverage_over_bins[start_bin] += 1.0;
+            }else{
+                
+                coverage_over_bins[start_bin] = (bin_size - start_offset) as f64 / bin_size as f64;
+                coverage_over_bins[end_bin] = end_offset as f64 / bin_size as f64;
+                if end_bin - start_bin > 1{
+                    for i in (start_bin + 1)..end_bin{
+                        coverage_over_bins[i] += 1.0;
+                }
+            }
+            
+            }
+        });
+        Ok(coverage_over_bins)
+    }
+
+    fn coverage_extend_to_fragment_single_end(
+        reader: &mut noodles_alignment::io::IndexedReader<std::fs::File>,
+            header: &noodles_sam::Header,
+            bin_size: usize,
+            filter: Filter,
+            region: Region, 
+            bin_count: usize,
+        ) -> Result<Vec<f64>, Box< dyn std::error::Error + Send + Sync>>
+    {
+        let mut coverage_over_bins:Vec<f64> = vec![0f64; bin_count];
+        reader.query(header, &region)?.map(|r| r.unwrap())
+        .filter(|record| !filter.apply(record).unwrap_or(false))
+        .for_each(|record| {
+
+            let start = record.alignment_start().unwrap().unwrap().get();
+            let end = record.alignment_end().unwrap().unwrap().get();
+            let template_length = record.template_length().unwrap();
+            let mut fragment_start: usize;
+            let mut fragment_end: usize;
+
+            if template_length < 0{
+                fragment_start = (end as i32 + template_length) as usize;
+                fragment_end = end;
+            }else{
+                fragment_start = start;
+                fragment_end = start + template_length as usize;
+            }
+            
+            let start_bin = (fragment_start - 1) /  bin_size; //noodles positions are 1-based. Yikes.
+            let start_offset= (fragment_start - 1) % bin_size;
+            let end_bin = std::cmp::min((fragment_end - 1) / bin_size, bin_count - 1); // Some aligners (e.g. BWA) can produce alignments that extend past the reference end. The BAM spec doesn't enforce that. Yikes.
+
+            let end_offset =  (fragment_end - 1) % bin_size;
+            
+            if end_bin == start_bin{
+                coverage_over_bins[start_bin] += 1.0;
+            }else{
+                
+                coverage_over_bins[start_bin] = (bin_size - start_offset) as f64 / bin_size as f64;
+                coverage_over_bins[end_bin] = end_offset as f64 / bin_size as f64;
+                if end_bin - start_bin > 1{
+                    for i in (start_bin + 1)..end_bin{
+                        coverage_over_bins[i] += 1.0;
+                }
+            }
+            
+            }
+        });
+        Ok(coverage_over_bins)
+
+        
     }
 
     fn get_coverage_chr_with_reader_iterating_reads(
@@ -213,8 +368,7 @@ impl<I> Alignment<I>{
             let end_bin = std::cmp::min((end.get() - 1) / bin_size, bin_count - 1); // Some aligners (e.g. BWA) can produce alignments that extend past the reference end. The BAM spec doesn't enforce that. Yikes.
 
             let end_offset =  (end.get() - 1) % bin_size;
-            
-            
+            let flags = record.flags().unwrap();
             
             if end_bin == start_bin{
                 coverage_over_bins[start_bin] += 1.0;
