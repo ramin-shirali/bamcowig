@@ -3,14 +3,16 @@ mod utils;
 use clap::Parser;
 use noodles_sam::header::record::value::map::Inner;
 use crate::utils::filter::Filter;
-use std::{env, path::{Path, PathBuf}};
+use std::{collections::HashMap, env, path::{Path, PathBuf}};
 use crate::utils::{bam_handler::{bam_index_reader, get_chr_chunk_reads, get_chromosome_names, get_chromosome_size_map}, filter};
 use crate::utils::alignment_handler;
 use std::any::type_name;
 use std::fs;
 use crate::utils::normalizer::{cpm, rpkm, rpgc, bpm};
+use bigtools::{BigWigWrite, Value};
+use bigtools::beddata::BedParserStreamingIterator;
+use bigtools::bed::bedparser::BedIteratorStream;
 
- 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Cli {
@@ -47,10 +49,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bin_size = args.bin_size;
     let extend_to_fragment = args.extend_to_fragment;
     let fraction_counts = args.fraction_counts;
-
+    let max_threads = args.threads;
 
     rayon::ThreadPoolBuilder::new()
-        .num_threads(args.threads)
+        .num_threads(max_threads)
         .build_global()
         .unwrap();
 
@@ -58,16 +60,59 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut alignment = alignment_handler::Alignment::from_bam(
         bam_file_path,  bam_index_file, None
     )?;
+
+    let chromosome_names = alignment.get_chromosome_names_str()?;
+    let chromosome_sizes = alignment.get_chromosome_sizes()?;
+
     let coverage_over_bins_all_chromosomes = alignment.coverage_by_bin_all(bin_size, filter, extend_to_fragment, fraction_counts)?;
     let normalized_over_bins_all_chromosomes = cpm(coverage_over_bins_all_chromosomes, alignment.total_reads().clone()).unwrap();
-    write_output(args.output_file, normalized_over_bins_all_chromosomes, bin_size as usize)?;
-
+    write_bigwig_output(args.output_file, normalized_over_bins_all_chromosomes, chromosome_names, chromosome_sizes, bin_size as usize, max_threads)?;
+    
     Ok(())
 }
 
 
-fn write_output(output: PathBuf, coverage_over_bins_all_chromosomes: Vec<Vec<f64>>, bin_size: usize) -> Result<(), Box<dyn std::error::Error>>{
+fn write_bigwig_output(output: PathBuf, coverage_over_bins_all_chromosomes: Vec<Vec<f64>>, chrom_names: Vec<String>, chrom_sizes: Vec<usize>, bin_size: usize, threads: usize) -> Result<(), Box<dyn std::error::Error>>{
+    
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(threads)
+        .enable_all()
+        .build()?;
+
+    let chrom_map: HashMap<String, u32> = chrom_names
+        .iter()
+        .zip(chrom_sizes.iter())
+        .map(|(name, size)| (name.to_string(), *size as u32))
+        .collect();
+
+    let values_iter = coverage_over_bins_all_chromosomes
+        .into_iter()
+        .enumerate()
+        .flat_map(|(chrom_idx, bins)| {
+            let chrom_name = chrom_names[chrom_idx].to_string();
+            bins.into_iter()
+                .enumerate()
+                .filter(|(_, val)| *val != 0.0)
+                .map(move |(bin_idx, val)| {
+                    let start = (bin_idx as u32) * bin_size as u32;
+                    let end = start + bin_size as u32;
+                    (chrom_name.clone(), Value { start, end, value: val as f32 })
+                })
+        });
+
+    // These two lines are the fix:
+    
+
+    let data_source = BedParserStreamingIterator::wrap_infallible_iter(values_iter, false);
+    let writer = BigWigWrite::create_file(output.to_string_lossy().to_string(), chrom_map)?;
+    writer.write(data_source, runtime)?;
+
+    Ok(())
+}
+
+fn write_bed_output(output: PathBuf, coverage_over_bins_all_chromosomes: Vec<Vec<f64>>, bin_size: usize) -> Result<(), Box<dyn std::error::Error>>{
     let mut content = String::new();
+    
     for (chr_idx, coverage_over_bins) in coverage_over_bins_all_chromosomes.iter().enumerate() {
         for (bin_idx, &coverage_single_bin) in coverage_over_bins.iter().enumerate() {
             let bin_start = bin_idx * bin_size;
