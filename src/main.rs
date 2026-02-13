@@ -4,7 +4,6 @@ use clap::Parser;
 use noodles_sam::header::record::value::map::Inner;
 use crate::utils::filter::Filter;
 use std::{collections::HashMap, env, path::{Path, PathBuf}};
-use crate::utils::{bam_handler::{bam_index_reader, get_chr_chunk_reads, get_chromosome_names, get_chromosome_size_map}, filter};
 use crate::utils::alignment_handler;
 use std::any::type_name;
 use std::fs;
@@ -106,8 +105,6 @@ fn write_bigwig_output(output: PathBuf, coverage_over_bins_all_chromosomes: Vec<
                     (chrom_name.clone(), Value { start, end, value: val as f32 })
                 })
         });
-
-    // These two lines are the fix:
     
 
     let data_source = BedParserStreamingIterator::wrap_infallible_iter(values_iter, false);

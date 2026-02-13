@@ -13,9 +13,9 @@ use noodles_cram::io::reader as CramReader;
 use noodles_cram::io::reader::Container as CramContainer;
 use rayon::{prelude::*};
 use std::path::Path;
-use crate::filter::Filter;
 pub type CsiIndex = csi::binning_index::Index<IndexMap<usize, VirtualPosition>>;
 use getset::{Getters, Setters, MutGetters};
+use crate::Filter;
 
 pub enum CountableIndex {
     Bai(bai::Index),
