@@ -480,4 +480,20 @@ impl<I> Alignment<I>{
 
         Ok(total)
     }
+
+    pub fn get_chromosome_names_str(&self) -> Result<Vec<String>, std::io::Error>{
+        let chrom_names: Vec<String> = self.header.reference_sequences()
+            .keys()
+            .cloned()
+            .into_iter()
+            .map(|b| b.to_string())
+            .collect();
+        Ok(chrom_names)
+    }
+
+    pub fn get_chromosome_sizes(&self) -> Result<Vec<usize>, std::io::Error>{
+        let chromosomes_sizes = self.header.reference_sequences()
+        .iter().map(|(_, info)| {info.length().get()}).collect();
+        Ok(chromosomes_sizes)
+    }
 }
