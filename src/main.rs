@@ -79,17 +79,24 @@ fn write_bigwig_output(output: PathBuf, coverage_over_bins_all_chromosomes: Vec<
         .enable_all()
         .build()?;
 
-    let chrom_map: HashMap<String, u32> = chrom_names
+    let mut sorted: Vec<_> = chrom_names
+        .into_iter()
+        .zip(chrom_sizes)
+        .zip(coverage_over_bins_all_chromosomes)
+        .map(|((name, size), coverage)| (name, size, coverage))
+        .collect();
+    
+    sorted.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let chrom_map: HashMap<String, u32> = sorted
         .iter()
-        .zip(chrom_sizes.iter())
-        .map(|(name, size)| (name.to_string(), *size as u32))
+        .map(|(name, size, _)| (name.to_string(), *size as u32))
         .collect();
 
-    let values_iter = coverage_over_bins_all_chromosomes
+    let values_iter = sorted
         .into_iter()
-        .enumerate()
-        .flat_map(|(chrom_idx, bins)| {
-            let chrom_name = chrom_names[chrom_idx].to_string();
+        .flat_map(|(chrom_name, _, bins)|
+        {
             bins.into_iter()
                 .enumerate()
                 .filter(|(_, val)| *val != 0.0)
